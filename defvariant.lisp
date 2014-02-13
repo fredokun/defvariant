@@ -25,15 +25,13 @@ quite useful macro for inline examples.
 	(error "Missing => in example expression"))
     (let ((result-var (gensym "result-"))
 	  (expected-var (gensym "expected-"))
-	  (expr-var (gensym "expr-"))
-	  (err-var (gensym "err-")))
+	  (expr-var (gensym "expr-")))
       `(let ((,result-var ,expr)
 	     (,expr-var (quote ,expr))
-	     (,expected-var ,expected)
-	     (,err-var ,err-fun))
+	     (,expected-var ,expected))
 	 (if (funcall ,eq? ,result-var ,expected-var)
 	     t
-	     (funcall ,err-var "Failed example:~%  Expression: ~A~%  ==> expected: ~A~%  ==> evaluated: ~A~%"
+	     (funcall ,err-fun "Failed example:~%  Expression: ~A~%  ==> expected: ~A~%  ==> evaluated: ~A~%"
 		  ,expr-var ,expected-var ,result-var))))))
 
 #|
@@ -342,14 +340,14 @@ The support function we rely on simply create the correct argument list.
 |#
 
 (defun build-match-args (variant case case-slots val)
-  (labels ((build-params (params)
-	     (if (null params)
-		 (list)
-		 (let ((access (intern (format nil "~A-~A-~A" variant case (car params)))))
-		   (cons `(,access ,val) (build-params (cdr params)))))))
+  (flet ((build-params (params)
+           (mapcar (lambda (param)
+                     `(,(intern (format nil "~A-~A-~A" variant case param)) ,val))
+                   params)))
     (if (eql case t)
 	nil
 	`(,@(build-params case-slots)))))
+
 
 (example (build-match-args 'btree 'leaf (list) 'v)
 	 => NIL)
@@ -364,29 +362,31 @@ The support function we rely on simply create the correct argument list.
 
 #|
 
-### Dispatch algorithm
-
-The dispatch algorithm can now be built by traversing
-simultenaously the case specifications and the corresponding
- match functions.
-
-It is useful to have an auxiliary function to fetch the
+As a companion to `build-match-args`, we define an auxiliary function to fetch the
  slots of a given variant case.
 
 |#
 
-(defun fetch-case-slots (case-id variant-cases)
-  (if (null variant-cases)
-      (error "No such variant case: ~A" case-id)
-      (if (eql (caar variant-cases) case-id)
-	  (cdar variant-cases)
-	  (fetch-case-slots case-id (cdr variant-cases)))))
+(defun build-case-slots (case-id variant-cases)
+  (labels ((fetch-case-slots 
+               (variant-cases)
+             (if (null variant-cases)
+                 (error "No such variant case: ~A" case-id)
+                 (if (eql (caar variant-cases) case-id)
+                     (cdar variant-cases)
+                     (fetch-case-slots (cdr variant-cases))))))
+    (if (eql case-id t)
+        nil
+        (fetch-case-slots variant-cases))))
 
-(example (fetch-case-slots 'leaf '((leaf) (node val left right)))
+(example (build-case-slots 'leaf '((leaf) (node val left right)))
 	 => NIL)
 
-(example (fetch-case-slots 'node '((leaf) (node val left right)))
+(example (build-case-slots 'node '((leaf) (node val left right)))
 	 => '(val left right))
+
+(example (build-case-slots 't '((leaf) (node val left right)))
+         => nil)
 
 #|
 
@@ -395,11 +395,19 @@ Of course it is an error to fetch an unknown case, which
 
 |#
 
-(example (handler-case (fetch-case-slots 'foo '((leaf) (node val left right)))
+(example (handler-case (build-case-slots 'foo '((leaf) (node val left right)))
 	   (simple-error () "error !"))
 	 => "error !")
 
+
 #|
+
+### Dispatch algorithm
+
+The dispatch algorithm can now be built by traversing
+simultenaously the case specifications and the corresponding
+ match functions.
+
 
 Now we can write the core of the dispatch algorithm.
 This simply consists in elaborating a list of `cond` clauses, each
@@ -408,7 +416,8 @@ This simply consists in elaborating a list of `cond` clauses, each
     (<condition> (<match-function> <match-arguments>))
 
 The `<match-function>` is obtained by `build-match-function` and the
-`<match-arguments>` are prepared thanks to `build-match-args`.
+`<match-arguments>` are prepared thanks to `build-match-args` and
+ `build-case-slots` already defined.
 
 The only missing piece in the puzzle is the `<condition>` expression, that
 is either `t` in the default case, or of the form:
@@ -429,49 +438,63 @@ for internal nodes.
 
 |#
 
-(defun build-dispatch-cases (variant variant-cases match-cases val)
-  (if (null match-cases)
-      (list)
-      (let ((condition (if (eql (caar match-cases) t)
-			   `t
-			   `(,(intern (format nil "~A-~A-P" variant (caar match-cases)))
-			      ,val)))
-	    (case-slots (if (eql (caar match-cases) t)
-				(list)
-				(fetch-case-slots (caar match-cases) variant-cases))))
-        (let ((match-fun (build-match-function (car match-cases)))
-              (match-args (build-match-args variant (caar match-cases) case-slots val)))
-          (cons `(,condition (,match-fun ,@match-args))
-                (build-dispatch-cases variant variant-cases (cdr match-cases) val))))))
+(defun build-condition (variant case-id val)
+  (if (eql case-id t)
+      't
+      `(,(intern (format nil "~A-~A-P" variant case-id))
+         ,val)))
 
-(example (build-dispatch-cases 'btree
-			       '((leaf) (node val left right))
-			       '((leaf () "leaf !")
-				 (node (v l r)  "node !")
-				 (t "default !"))
-			       'val)
-	 =>
-	 '(((BTREE-LEAF-P VAL) ((LAMBDA (&rest <gensymed>-args)
-                                  (declare (ignore <gensymed>-args))
-                                  "leaf !"))
-            ((BTREE-NODE-P VAL) ((LAMBDA (v l r)
-                                   "node !")
-                                 (BTREE-NODE-VAL VAL)
-                                 (BTREE-NODE-LEFT VAL)
-                                 (BTREE-NODE-RIGHT VAL)))
-            (T ((LAMBDA () "default !")))))
-         :warn-only t)
+(example (build-condition 'btree 'leaf 'v)
+         => '(BTREE-LEAF-P v))
+
+(example (build-condition 'btree 'node 'v)
+         => '(BTREE-NODE-P v))
+
+(example (build-condition 'btree 't 'v)
+         => 'T)
 
 #|
 
-The dispatch "algorithm" just put all the dispatch cases in one
- big `cond` form.
+We are finally ready to build the case dispatch function.
 
 |#
 
 (defun build-dispatch (variant variant-cases match-cases val)
-  (let ((dispatch (build-dispatch-cases variant variant-cases match-cases val)))
-    `(cond ,@dispatch)))
+  (let ((dispatch-cases
+         (mapcar (lambda (match-case)
+                   (let ((condition
+                          (build-condition variant (car match-case) val)) 
+                         (match-fun 
+                          (build-match-function match-case))
+                         (match-args 
+                          (build-match-args variant 
+                                            (car match-case)
+                                            (build-case-slots (car match-case) 
+                                                              variant-cases) 
+                                            val)))
+                     `(,condition (,match-fun ,@match-args))))
+                 match-cases)))
+    ;; body
+    `(cond ,@dispatch-cases)))
+
+(example (build-dispatch 'btree
+                         '((leaf) (node val left right))
+                         '((leaf () "leaf !")
+                           (node (v l r)  "node !")
+                           (t "default !"))
+                         'val)
+	 =>
+	 '(COND 
+           ((BTREE-LEAF-P VAL) ((LAMBDA (&rest <gensymed>-args)
+                                  (declare (ignore <gensymed>-args))
+                                  "leaf !")))
+           ((BTREE-NODE-P VAL) ((LAMBDA (v l r)
+                                  "node !")
+                                (BTREE-NODE-VAL VAL)
+                                (BTREE-NODE-LEFT VAL)
+                                (BTREE-NODE-RIGHT VAL)))
+           (T ((LAMBDA () "default !"))))
+         :warn-only t)
 
 #|
 
