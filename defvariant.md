@@ -17,23 +17,38 @@ An "advanced-beginner" or intermediate level of Common Lisp is required.
 We begin with a small refresher for macros with a simple although
 quite useful macro for inline examples.
 
+The macro can be deactivated so that it becomes totally silent.
+
+
+
+```lisp
+(defvar *example-enabled* t) ;; nil to disable
+
+```
+
+
+And the definition follows.
+
 
 
 ```lisp
 (defmacro example (expr arrow expected &key (eq? #'equal) (warn-only nil))
-  (let ((err-fun (if warn-only #'warn #'error)))
-    (if (not (eq arrow '=>))
-	(error "Missing => in example expression"))
-    (let ((result-var (gensym "result-"))
-	  (expected-var (gensym "expected-"))
-	  (expr-var (gensym "expr-")))
-      `(let ((,result-var ,expr)
-	     (,expr-var (quote ,expr))
-	     (,expected-var ,expected))
-	 (if (funcall ,eq? ,result-var ,expected-var)
-	     t
-	     (funcall ,err-fun "Failed example:~%  Expression: ~A~%  ==> expected: ~A~%  ==> evaluated: ~A~%"
-		  ,expr-var ,expected-var ,result-var))))))
+  (if (not *example-enabled*)
+      nil ;; synonymous of nil if disabled
+      ;; when enabled
+      (let ((err-fun (if warn-only #'warn #'error)))
+        (if (not (eq arrow '=>))
+            (error "Missing => in example expression"))
+        (let ((result-var (gensym "result-"))
+              (expected-var (gensym "expected-"))
+              (expr-var (gensym "expr-")))
+          `(let ((,result-var ,expr)
+                 (,expr-var (quote ,expr))
+                 (,expected-var ,expected))
+             (if (funcall ,eq? ,result-var ,expected-var)
+                 t
+                 (funcall ,err-fun "Failed example:~%  Expression: ~A~%  ==> expected: ~A~%  ==> evaluated: ~A~%"
+                          ,expr-var ,expected-var ,result-var)))))))
 
 ```
 
@@ -46,9 +61,9 @@ macro-expansion informations.
 A valid example will simply evaluate to `T`.
 
 
+
 ```lisp
-  
-(example 1 => 1)  ;; => T
+(example 1 => 1) ;; => T
 
 ```
 
@@ -101,7 +116,7 @@ It is quite easy to generate the structure types.
 
 For the generic `<variant>` we would need something like:
 
-    (DEFSTRUCT (<variant> (:CONSTRUCTOR NIL)))
+     (DEFSTRUCT (<variant> (:CONSTRUCTOR NIL)))
 
 So let's use the following function:
 
