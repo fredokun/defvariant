@@ -21,7 +21,9 @@ The macro can be deactivated so that it becomes totally silent.
 
 |#
 
-(defparameter *example-enabled* t)
+(defparameter *example-enabled* t
+  "Compile-time parameter for enabling/disabling
+the `EXAMPLE` macro. Use NIL in production code.")
 
 #|
 
@@ -30,6 +32,13 @@ And the definition follows.
 |#
 
 (defmacro example (expr arrow expected &key (eq? #'equal) (warn-only nil))
+  "Show an evaluation example, useful for documentation and lightweight testing.
+
+   (example `EXPR` => `EXPECTED`) evaluates `EXPR` and compare, wrt. `EQ?`
+ (EQUAL by default) to `EXPECTED` and raise an error if inequal.
+
+  Set `WARN-ONLY` to T for warning instead of error.
+"
   (if (not *example-enabled*)
       nil ;; synonymous of nil if disabled
       ;; when enabled
@@ -135,6 +144,7 @@ Before continuing, let's define two nice utilities
 |#
 
 (defun stringify (&rest args)  ;; originaly mkstr
+  "Converts to a string and append all `ARGS`."
   (with-output-to-string (s)
     (dolist (a args) (princ a s))))
 
@@ -142,6 +152,8 @@ Before continuing, let's define two nice utilities
          => "ONE-2-three-4")
 
 (defun symbolize (&rest args) ;; originally symb
+  "Converts to a string, append and create a symbol
+from the result."
   (values (intern (apply #'stringify args))))
 
 (example (symbolize 'one- 2 "-three-" (+ 2 2))
@@ -189,6 +201,7 @@ We first define an abbreviation for the mouthful `multiple-value-bind`.
 |#
 
 (defmacro lets (binders expr &body body)
+  "A abbreviation for MULTIPLE-VALUE-BIND."
     `(multiple-value-bind ,binders ,expr ,@body)) 
 
 (example (lets (a b c) (values 1 2 3)
@@ -660,6 +673,7 @@ glory details.
 
 (defun build-match-macro (variant variant-cases)
   `(defmacro ,(symbolize "MATCH-" variant) (expr &body match-cases)
+     ,(format nil "Match values of variant type: ~A." variant)
      (let ((expr-var (gensym "-val")))
        `(let ((,expr-var ,expr))
 	  ,(build-dispatch `,',variant `,',variant-cases match-cases expr-var)))))
@@ -677,6 +691,7 @@ Consider the example of the match-macro for our binary trees:
 (example (build-match-macro 'btree 
 			    '((leaf) (node val left right)))
 	 => '(DEFMACRO MATCH-BTREE (EXPR &BODY MATCH-CASES)
+              "Match values of variant type: BTREE."
 	      (LET ((EXPR-VAR (GENSYM "-val")))
 		`(LET ((,EXPR-VAR ,EXPR))
 		   ,(BUILD-DISPATCH 'BTREE '((LEAF) (NODE VAL LEFT RIGHT)) 
