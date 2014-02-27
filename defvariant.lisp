@@ -1,5 +1,5 @@
 
-(in-package :defvariant)
+(in-package #:defvariant)
 
 #| 
 
@@ -23,8 +23,8 @@ The macro can be deactivated so that it becomes totally silent.
 
 |#
 
-(defparameter *example-enabled* nil
-  "Compile-time parameter for enabling/disabling
+(defvar *example-enabled* t
+  "Parameter for enabling/disabling
 the `EXAMPLE` macro. Use NIL in production code.")
 
 #|
