@@ -22,7 +22,7 @@ The macro can be deactivated so that it becomes totally silent.
 
 
 ```lisp
-(defvar *example-enabled* t) ;; nil to disable
+(defparameter *example-enabled* t)
 
 ```
 
@@ -297,6 +297,20 @@ Finally, something like:
       (node (v l r)  (format t "node: val=~A left=~A right=~A" v l r)))
 
 should generate an error, as in various other misuses of the macro.
+We introduce a condition type for match errors. 
+
+
+
+```lisp
+(define-condition match-error  (error)
+  ((message :initarg :message
+            :reader match-error-message))
+  (:report (lambda (condition stream)
+             (format stream "Match error: ~A"
+                     (match-error-message condition)))))
+
+```
+
 
 ### Match functions
 
@@ -470,7 +484,7 @@ As a companion to `build-match-args`, we define an auxiliary function to fetch t
 (defun build-case-slots (case-id variant-cases)
   (labels ((fetch-case-slots (variant-cases)
              (if (null variant-cases)
-                 (error "No such variant case: ~A" case-id)
+                 (error 'match-error :message (format nil "No such variant case: ~A" case-id))
                  (if (or (and (consp (caar variant-cases))
                               (eql (caaar variant-cases) case-id)) ;; case with opts
                          (eql (caar variant-cases) case-id))  ;; case without opts
@@ -501,19 +515,9 @@ As a companion to `build-match-args`, we define an auxiliary function to fetch t
 (example (build-case-slots 't '((leaf) (node val left right)))
          => nil)
 
-```
-
-
-Of course it is an error to fetch an unknown case, which
- will be the main error-checking feature of our macro.
-
-
-
-```lisp
-(example (handler-case (build-case-slots 'foo '((leaf) (node val left right)))
-	   (simple-error () "error !"))
-	 => "error !")
-
+(example (handler-case (build-case-slots 'hello '((leaf) ((node (:type list)) val left right)))
+           (match-error (err) (match-error-message err)))
+         => "No such variant case: HELLO")
 
 ```
 
@@ -574,6 +578,9 @@ for internal nodes.
 
 
 We are finally ready to build the case dispatch function.
+It is a little bit verbose and we use a recursion
+ pattern so that error checking feels natural, but 
+there is no real difficulty involved.
 
 
 
@@ -582,16 +589,18 @@ We are finally ready to build the case dispatch function.
   (labels ((build-cases (match-cases known-cases)
              (if (null match-cases)
                  (if (null known-cases)
-                     (error "No case in match")
-                     (list))
+                     (error 'match-error :message "No case in match")
+                     (if (not (member 't known-cases))
+                         '((t (error 'match-error :message "Cannot match argument")))
+                         (list)))
                  ;; recursive case
                  (let ((match-case (car match-cases)))
                    ;; some checks
                    (cond ((and (eql (car match-case) t)
                                (consp (cdr match-cases)))
-                          (error "Default case must be last in match"))
+                          (error 'match-error :message "Default case must be last in match"))
                          ((member (car match-case) known-cases)
-                          (error (stringify "Duplicate case in match: " (car match-case))))
+                          (error 'match-error :message (stringify "Duplicate case in match: " (car match-case))))
                          (t
                           (let ((condition
                                  (build-condition variant (car match-case) val)) 
@@ -646,24 +655,27 @@ We are finally ready to build the case dispatch function.
            (T ((LAMBDA () "default !"))))
          :warn-only t)
 
-;; TODO: get real error message ... from simple error ?  from own condition ?
 (example (handler-case (build-dispatch 'test '((dummy)) '((dummy () "dummy =")
                                                           (t "oops !")
                                                           (dummy () "dumb dummy")) 'val)
-           (simple-error () "error !"))
-         => "error !")
+           (match-error (err) (match-error-message err)))
+         => "Default case must be last in match")
 
 (example (handler-case (build-dispatch 'test '((dummy)) '((dummy () "dummy =")
                                                           (pfumg "oops !")
                                                           (dummy () "dumb dummy")) 'val)
-           (simple-error () "error !"))
-         => "error !")
+           (match-error (err) (match-error-message err)))
+         => "No such variant case: PFUMG")
 
 (example (handler-case (build-dispatch 'test '((dummy)) '((dummy () "dummy =")
                                                           (dummy () "dumb dummy")
                                                           (t "oops !")) 'val)
-           (simple-error () "error !"))
-         => "error !")
+           (match-error (err) (match-error-message err)))
+         => "Duplicate case in match: DUMMY")
+
+(example (handler-case (build-dispatch 'test '((dummy)) '() 'val)
+           (match-error (err) (match-error-message err)))
+         => "No case in match")
 
 ```
 
@@ -754,6 +766,12 @@ And now let's try our `defvariant` form.
 	   (node _ "node !")
 	   (t "default !"))
 	 => "default !")
+
+(example (handler-case (match-btree 12
+                         (leaf _ "leaf !")
+                         (node _ "node !"))
+           (match-error (err) (match-error-message err)))
+         => "Cannot match argument")
 
 (example (match-btree (make-btree-leaf)
 	   (leaf _ "leaf !")
