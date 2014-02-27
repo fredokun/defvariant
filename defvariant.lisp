@@ -1,4 +1,6 @@
 
+(in-package :defvariant)
+
 #| 
 
 # Variants in Common Lisp #
@@ -21,7 +23,7 @@ The macro can be deactivated so that it becomes totally silent.
 
 |#
 
-(defparameter *example-enabled* t
+(defparameter *example-enabled* nil
   "Compile-time parameter for enabling/disabling
 the `EXAMPLE` macro. Use NIL in production code.")
 
@@ -731,9 +733,10 @@ And now let's try our `defvariant` form.
 |#
 
 
-(defvariant btree
-  (leaf)
-  (node val left right))
+(example (defvariant btree
+           (leaf)
+           (node val left right))
+         => 'MATCH-BTREE)
 
 (example (match-btree 12
 	   (leaf _ "leaf !")
