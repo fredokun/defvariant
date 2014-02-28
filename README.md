@@ -22,8 +22,8 @@ Variants for Common Lisp (for ML nostalgics ?)
                          :left (make-btree-leaf) 
                          :right (make-btree-leaf))))
   (match-btree my-tree
-     	   (leaf _ "leaf !")
-	   (node (v l r) v)))
+        (leaf _ "leaf !")
+        (node (v l r) v)))
 ```
 
 `=> 42`
