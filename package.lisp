@@ -4,7 +4,8 @@
   (:use #:cl)
   (:export
    #:match-error
-   #:defvariant))
+   #:defvariant
+   #:match-error-message))
 
 (in-package #:defvariant)
 
