@@ -359,7 +359,53 @@ The default case will be of the form
     (lambda () <expr_default> ...)
 
 
-These `lambda` forms are created by the following function.
+We will add a special meaning for the variable `_` (underscore),
+ that automatically ignore a match argument (as in ocaml).
+
+
+
+
+```lisp
+(defun build-lambda-parameters (params body)
+  (let ((nparams (mapcar (lambda (param)
+			   (if (equal (symbol-name param) "_")
+			       (gensym "_")
+			       param)) params)))
+    (labels ((ignore-params (params nparams)
+	       (if (null params)
+		   (list)
+		   (if (equal (symbol-name (car params)) "_")
+		       (cons (car nparams) (ignore-params (cdr params) (cdr nparams)))
+		       (ignore-params (cdr params) (cdr nparams))))))
+      (let ((iparams (ignore-params params nparams)))
+	`(lambda ,nparams
+	   ,@(if iparams
+		 `((declare (ignore ,@iparams)))
+		 nil)
+	   ,@body)))))
+
+(example (build-case-parameters '(v l r) '(e1 e2 e3))
+	 => '(LAMBDA (V L R) E1 E2 E3))
+
+
+(example (build-lambda-parameters '(v l _) '(e1 e2 e3))
+	 => '(LAMBDA (V L |_<gensymed>|) 
+	      (DECLARE (IGNORE |_<gensymed>|))
+	      E1 E2 E3)
+	 :warn-only t)
+
+
+(example (build-lambda-parameters '(_ l _) '(e1 e2 e3))
+	 => '(LAMBDA (V L |_<gensymed>|) 
+	      (DECLARE (IGNORE |_<gensymed>| |_<gensymed>|))
+	      E1 E2 E3)
+	 :warn-only t)
+			      
+
+```
+
+
+The `lambda` forms in general are created by the following function.
 
 
 
@@ -372,7 +418,7 @@ These `lambda` forms are created by the following function.
       ;; normal case
       (if (consp (cadr case-spec))
 	  ;; parameter list
-	  `(lambda ,(cadr case-spec) ,@(cddr case-spec))
+	  (build-lambda-parameters (cadr case-spec) (cddr case-spec))
 	  ;; no parameter list
 	  (let ((args-var (gensym "args-")))
 	    `(lambda (&rest ,args-var)
@@ -396,10 +442,17 @@ as assertions, but the warning message shows that example is indeed "correct".
 
 ```lisp
 (example (build-match-function '(node (v l r) (princ v) (princ l) (princ r)))
-	 => '(LAMBDA (v l r)
-	      (PRINC v)
-	      (PRINC l) 
-	      (PRINC r)))
+	 => '(LAMBDA (V L R)
+	      (PRINC V)
+	      (PRINC L) 
+	      (PRINC R)))
+
+(example (build-match-function '(node (v _ r) (princ v) (princ r)))
+	 => '(LAMBDA (V |_<gensymed>| R)
+	      (DECLARE (IGNORE |_<gensymed>|))
+	      (PRINC V)
+	      (PRINC R))
+	 :warn-only t)
 
 (example (build-match-function '(node _ (princ "this is a ") (princ "node !")))
 	 => '(LAMBDA (&REST |args-<gensymed>|)
@@ -805,6 +858,13 @@ And now let's try our `defvariant` form.
 	   (node (v l r) (format nil "node: val=~A left=~A right=~A" v l r))
 	   (t "default !"))
 	 => "node: val=42 left=#S(BTREE-LEAF) right=#S(BTREE-LEAF)")
+
+
+(example (match-btree (make-btree-node :val 42 :left (make-btree-leaf) :right (make-btree-leaf))
+	   (leaf _ "leaf !")
+	   (node (v _ _) v)
+	   (t "default !"))
+	 => 42)
 
 
 ```
