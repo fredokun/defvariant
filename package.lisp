@@ -3,9 +3,11 @@
   (:nicknames #:variant)
   (:use #:cl)
   (:export
-   #:match-error
    #:defvariant
-   #:match-error-message))
+   #:match-error
+   #:match-error-message
+   #:match-warning
+   #:match-warning-message))
 
 (in-package #:defvariant)
 
