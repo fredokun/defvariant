@@ -95,6 +95,7 @@ For the deconstruction of points, we would then either go the basic lisp-ish way
          (format nil "~s(~d,~d)" (point-named-name p) 
                                  (point-named-x p) 
                                  (point-named-y p))))))
+```
             
 Another possibility would be to go the macro-slightly-ocaml-ish way:
 
