@@ -6,3 +6,5 @@ MARKDOWNIZE="python3.2 ../markdownize/markdownize.py"
 
 $MARKDOWNIZE -i defvariant.lisp -o defvariant.md -b '#|' -e '|#' -l 'lisp'
 
+$MARKDOWNIZE -i manual.lisp -o manual.md -b '#|' -e '|#' -l 'lisp'
+

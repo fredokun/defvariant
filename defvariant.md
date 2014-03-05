@@ -52,7 +52,7 @@ And the definition follows.
       nil ;; synonymous of nil if disabled
       ;; when enabled
       (let ((err-fun (if warn-only #'warn #'error)))
-        (if (not (eq arrow '=>))
+        (if (not (equal (symbol-name arrow) "=>"))
             (error "Missing => in example expression"))
         (let ((result-var (gensym "result-"))
               (expected-var (gensym "expected-"))
