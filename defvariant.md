@@ -16,6 +16,8 @@ It is a good example of a non-trivial "macro-generating-macro" so
 
 An "advanced-beginner" or intermediate level of Common Lisp is required.
 
+**Remark** : a simpler and more pedagogical-minded version of `defvariant` is available at https://github.com/fredokun/defvariant/tree/v0.2_tutorial
+
 ## A macro refresher
 
 We begin with a small refresher for macros with a simple although
