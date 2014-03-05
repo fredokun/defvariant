@@ -222,7 +222,7 @@ We first define an abbreviation for the mouthful `multiple-value-bind`.
 
 ```lisp
 (defmacro lets (binders expr &body body)
-  "A abbreviation for MULTIPLE-VALUE-BIND."
+  "An abbreviation for MULTIPLE-VALUE-BIND."
     `(multiple-value-bind ,binders ,expr ,@body)) 
 
 (example (lets (a b c) (values 1 2 3)
@@ -314,7 +314,8 @@ Finally, something like:
       (node (v l r)  (format t "node: val=~A left=~A right=~A" v l r)))
 
 should generate an error, as in various other misuses of the macro.
-We introduce a condition type for match errors. 
+We introduce a condition type for match errors and another one
+ for the warnings. 
 
 
 
@@ -323,8 +324,15 @@ We introduce a condition type for match errors.
   ((message :initarg :message
             :reader match-error-message))
   (:report (lambda (condition stream)
-             (format stream "Match error: ~A"
+             (format stream "[Match error] ~A"
                      (match-error-message condition)))))
+
+(define-condition match-warning  (warning)
+  ((message :initarg :message
+            :reader match-warning-message))
+  (:report (lambda (condition stream)
+             (format stream "[Match warning] ~A"
+                     (match-warning-message condition)))))
 
 ```
 
@@ -384,7 +392,7 @@ We will add a special meaning for the variable `_` (underscore),
 		 nil)
 	   ,@body)))))
 
-(example (build-case-parameters '(v l r) '(e1 e2 e3))
+(example (build-lambda-parameters '(v l r) '(e1 e2 e3))
 	 => '(LAMBDA (V L R) E1 E2 E3))
 
 
@@ -400,7 +408,6 @@ We will add a special meaning for the variable `_` (underscore),
 	      (DECLARE (IGNORE |_<gensymed>| |_<gensymed>|))
 	      E1 E2 E3)
 	 :warn-only t)
-			      
 
 ```
 
@@ -648,104 +655,185 @@ for internal nodes.
 
 
 We are finally ready to build the case dispatch function.
-It is a little bit verbose and we use a recursion
- pattern so that error checking feels natural, but 
-there is no real difficulty involved.
+The definition below is a little bit verbose. And it is based on a
+recursive building of cases (cf. subfunction `build-cases`).
+This is because we take advantage of going through all the cases to
+perform some compile-time error checking.  We also do some compile-time
+ exhaustiveness checks.
+
+But there is not deep difficulty in the code below.
 
 
 
 ```lisp
 (defun build-dispatch (variant variant-cases match-cases val)
-  (labels ((build-cases (match-cases known-cases)
-             (if (null match-cases)
-                 (if (null known-cases)
-                     (error 'match-error :message "No case in match")
-                     (if (not (member 't known-cases))
-                         '((t (error 'match-error :message "Cannot match argument")))
-                         (list)))
-                 ;; recursive case
-                 (let ((match-case (car match-cases)))
-                   ;; some checks
-                   (cond ((and (eql (car match-case) t)
-                               (consp (cdr match-cases)))
-                          (error 'match-error :message "Default case must be last in match"))
-                         ((member (car match-case) known-cases)
-                          (error 'match-error :message (stringify "Duplicate case in match: " (car match-case))))
-                         (t
-                          (let ((condition
-                                 (build-condition variant (car match-case) val)) 
-                                (match-fun 
-                                 (build-match-function match-case))
-                                (match-args 
-                                 (build-match-args variant 
-                                                   (car match-case)
-                                                   (build-case-slots (car match-case) 
-                                                                     variant-cases) 
-                                                   val)))
-                            (cons `(,condition (,match-fun ,@match-args))
-                                  (build-cases (cdr match-cases) (cons (car match-case) known-cases))))))))))
+  (labels 
+      ((build-cases (match-cases known-cases)
+	 (if (null match-cases)
+	     (if (null known-cases)
+		 (error 'match-error :message "No case in match")
+		 ;; do some exhaustiveness checks
+		 (let ((missing-cases (remove-duplicates (set-difference (mapcar #'car variant-cases) known-cases))))
+		   (if (not (member 't known-cases))
+		       ;; default case is not present
+		       (progn 
+			 (if (consp missing-cases)
+			     ;; not all cases taken into account
+			     (warn 'match-warning :message (stringify "Non-exhaustive match, missing cases: " missing-cases)))
+			 `((t (error 'match-error :message ,(stringify "Cannot match argument: not a " variant)))))
+		       ;; default case is present
+		       (progn
+			 (if (null missing-cases)
+			     ;; all cases taken into account
+			     (warn 'match-warning :message (stringify "Default case redundant: match is exhaustive")))
+			 (list)))))
+	     ;; recursive case
+	     (let ((match-case (car match-cases)))
+	       ;; some checks
+	       (cond ((and (eql (car match-case) t)
+			   (consp (cdr match-cases)))
+		      (error 'match-error :message "Default case must be last in match"))
+		     ((member (car match-case) known-cases)
+		      (error 'match-error :message (stringify "Duplicate case in match: " (car match-case))))
+		     (t
+		      (let ((condition
+			     (build-condition variant (car match-case) val)) 
+			    (match-fun 
+			     (build-match-function match-case))
+			    (match-args 
+			     (build-match-args variant 
+					       (car match-case)
+					       (build-case-slots (car match-case) 
+								 variant-cases) 
+					       val)))
+			(cons `(,condition (,match-fun ,@match-args))
+			      (build-cases (cdr match-cases) (cons (car match-case) known-cases))))))))))
     ;; body
     `(cond ,@(build-cases match-cases '()))))
 
+
+```
+
+
+Let's begin by a general example.
+
+
+
+
+```lisp
 (example (build-dispatch 'btree
                          '((leaf) (node val left right))
                          '((leaf () "leaf !")
-                           (node (v l r)  "node !")
-                           (t "default !"))
+                           (node (v l r)  "node !"))
                          'val)
 	 =>
 	 '(COND 
            ((BTREE-LEAF-P VAL) ((LAMBDA (&rest |args-<gensymed>|)
                                   (declare (ignore |args-<gensymed>|))
                                   "leaf !")))
-           ((BTREE-NODE-P VAL) ((LAMBDA (v l r)
+           ((BTREE-NODE-P VAL) ((LAMBDA (V L R)
                                   "node !")
                                 (BTREE-NODE-VAL VAL)
                                 (BTREE-NODE-LEFT VAL)
                                 (BTREE-NODE-RIGHT VAL)))
-           (T ((LAMBDA () "default !"))))
+           (T (ERROR 'MATCH-ERROR :MESSAGE
+	       "Cannot match argument: not a BTREE")))
          :warn-only t)
 
-(example (build-dispatch 'btree
-                         '((leaf) ((node (:type list)) (val 0 (:type int)) left right))
-                         '((leaf () "leaf !")
-                           (node (v l r)  "node !")
-                           (t "default !"))
-                         'val)
-	 =>
-	 '(COND 
-           ((BTREE-LEAF-P VAL) ((LAMBDA (&rest |args-<gensymed>|)
-                                  (declare (ignore |args-<gensymed>|))
-                                  "leaf !")))
-           ((BTREE-NODE-P VAL) ((LAMBDA (v l r)
-                                  "node !")
-                                (BTREE-NODE-VAL VAL)
-                                (BTREE-NODE-LEFT VAL)
-                                (BTREE-NODE-RIGHT VAL)))
-           (T ((LAMBDA () "default !"))))
-         :warn-only t)
+```
 
-(example (handler-case (build-dispatch 'test '((dummy)) '((dummy () "dummy =")
+
+#### Compile-time error checking ####
+
+We give below a few example illustrating the different checks we
+perform at compile-time.
+
+First, let check for the special case when there is no case in the match.
+
+
+
+```lisp
+(example (handler-case (build-dispatch 'test '((dummy)) '() 'val)
+           (match-error (err) (match-error-message err)))
+         => "No case in match")
+
+
+```
+
+
+Then, we check that the default `t` case is last in
+
+
+
+```lisp
+(example (handler-case (build-dispatch 'test '((dummy)) '((dummy () "dummy")
                                                           (t "oops !")
                                                           (dummy () "dumb dummy")) 'val)
            (match-error (err) (match-error-message err)))
          => "Default case must be last in match")
 
-(example (handler-case (build-dispatch 'test '((dummy)) '((dummy () "dummy =")
+
+```
+
+
+Now let's see with an unkwnown case.
+
+
+
+```lisp
+(example (handler-case (build-dispatch 'test '((dummy)) '((dummy () "dummy")
                                                           (pfumg "oops !")
                                                           (dummy () "dumb dummy")) 'val)
            (match-error (err) (match-error-message err)))
          => "No such variant case: PFUMG")
 
-(example (handler-case (build-dispatch 'test '((dummy)) '((dummy () "dummy =")
+```
+
+
+And finally the check for duplicated cases.
+
+
+
+```lisp
+(example (handler-case (build-dispatch 'test '((dummy)) '((dummy () "dummy")
                                                           (dummy () "dumb dummy")
                                                           (t "oops !")) 'val)
            (match-error (err) (match-error-message err)))
          => "Duplicate case in match: DUMMY")
 
-(example (handler-case (build-dispatch 'test '((dummy)) '() 'val)
-           (match-error (err) (match-error-message err)))
-         => "No case in match")
+```
+
+
+#### Exhaustiveness checks
+
+Let's check if non-exhaustive check is signaled correctly.
+
+
+
+```lisp
+(example (handler-case (build-dispatch 'test '((leaf) (bnode) (tnode)) 
+				       '((leaf () "leaf !")
+					 (tnode () "tnode !")) 'val)
+           (match-warning (wrn) (match-warning-message wrn)))
+         => "Non-exhaustive match, missing cases: (BNODE)")
+
+
+```
+
+
+The second check is if the match is exhaustive and a default
+case is explicitely provided.
+
+
+
+```lisp
+(example (handler-case (build-dispatch 'test '((leaf) (bnode) (tnode)) 
+				       '((leaf () "dummy =")
+					 (tnode () "tnode !")
+					 (bnode () "bnode !")
+					 (t () "default !")) 'val)
+           (match-warning (wrn) (match-warning-message wrn)))
+         => "Default case redundant: match is exhaustive")
 
 ```
 
